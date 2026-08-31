@@ -1,0 +1,12 @@
+# Environment variables
+.env
+local.env
+
+# Python cache & build files
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Local data
+price_history.json
