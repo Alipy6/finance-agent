@@ -154,9 +154,6 @@ def get_historical_comparison(days_ago: int = 7, file_path: str = None) -> dict:
     valid_records.sort(key=lambda x: x[0])
     oldest_dt, oldest_price = valid_records[0]
 
-    max_allowed_diff_seconds = (days_ago * 86400) * 0.2
-    actual_diff_seconds = (now - oldest_dt).total_seconds()
-
     # If the oldest logged record is significantly newer than the requested target time
     if (oldest_dt - target_time).total_seconds() > 43200:
         return {

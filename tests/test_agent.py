@@ -67,3 +67,37 @@ def test_act_step(mock_toman, mock_gold):
     assert "get_toman_rate" in results
     assert results["get_gold_price"]["price_per_oz_usd"] == 2700.0
     assert results["get_toman_rate"]["rate_toman"] == 60000.0
+
+
+@patch("tools.get_gold_price")
+@patch("tools.get_toman_rate")
+def test_act_step_auto_fetch_toman_and_gold(mock_toman, mock_gold):
+    mock_gold.return_value = {
+        "status": "success",
+        "price_per_oz_usd": 2500.0,
+        "price_per_gram_24k_usd": 80.38
+    }
+    mock_toman.return_value = {
+        "status": "success",
+        "symbol": "USDT_IRT",
+        "rate_toman": 60000.0
+    }
+
+    # Plan only specifies calculator with toman_amount, neither gold nor toman planned
+    plan = {
+        "tools": [
+            {
+                "name": "calculator",
+                "params": {"toman_amount": 60000000.0}
+            }
+        ]
+    }
+    results = act_step(plan)
+
+    # Should auto-fetch both get_gold_price and get_toman_rate
+    mock_gold.assert_called_once()
+    mock_toman.assert_called_once()
+    assert "get_gold_price" in results
+    assert "get_toman_rate" in results
+    assert "calculator" in results
+    assert results["calculator"]["status"] == "success"

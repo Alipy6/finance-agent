@@ -94,6 +94,14 @@ def act_step(plan: dict) -> dict:
         gold_data = tools.get_gold_price()
         results["get_gold_price"] = gold_data
 
+    calc_needs_toman = any(
+        item.get("name") == "calculator" and (item.get("params") or {}).get("toman_amount") is not None
+        for item in tool_list
+    )
+    if calc_needs_toman and not toman_data:
+        toman_data = tools.get_toman_rate()
+        results["get_toman_rate"] = toman_data
+
     for item in tool_list:
         name = item.get("name")
         params = item.get("params", {}) or {}
@@ -147,12 +155,3 @@ def run_agent(user_question: str) -> str:
     except Exception as e:
         logger.error(f"Error in agent workflow: {e}", exc_info=True)
         return "متأسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً از فعال بودن سرویس OmniRoute و اتصال اینترنت اطمینان حاصل کنید."
-
-        cleaned = clean_json_text(raw_output)
-        plan = json.loads(cleaned)
-        if isinstance(plan, dict) and "tools" in plan:
-            return plan
-    except Exception as e:
-        logger.warning(f"Plan parsing failed or OmniRoute call failed: {e}. Falling back to default plan.")
-    
-    return {"tools": [{"name": "get_gold_price"}, {"name": "get_toman_rate"}]}
