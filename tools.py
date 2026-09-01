@@ -78,7 +78,16 @@ def get_toman_rate(api_key: str = None) -> dict:
 
     url = f"https://Api.BrsApi.ir/Market/Gold_Currency.php?key={key}"
     try:
-        resp = requests.get(url, timeout=10)
+        resp = requests.get(
+    url,
+    headers={
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+    },
+    timeout=10,
+)
         resp.raise_for_status()
         data = resp.json()
         

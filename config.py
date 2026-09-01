@@ -14,6 +14,5 @@ load_dotenv(dotenv_path=env_file)
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 BRSAPI_KEY = os.getenv("BRSAPI_KEY", "")
-OMNIROUTE_BASE_URL = os.getenv("OMNIROUTE_BASE_URL", "http://localhost:20128/v1").rstrip("/")
-OMNIROUTE_MODEL = os.getenv("OMNIROUTE_MODEL", "auto")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 HISTORY_FILE_PATH = str(BASE_DIR / os.getenv("HISTORY_FILE_PATH", "price_history.json"))

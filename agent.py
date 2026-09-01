@@ -2,7 +2,7 @@ import json
 import logging
 import re
 import requests
-from config import OMNIROUTE_BASE_URL, OMNIROUTE_MODEL
+from config import GEMINI_API_KEY
 import tools
 
 logger = logging.getLogger(__name__)
@@ -29,20 +29,30 @@ Instructions:
 
 
 def call_omniroute_llm(system_prompt: str, user_message: str, model: str = None, base_url: str = None) -> str:
-    """Call OmniRoute OpenAI-compatible endpoint using requests."""
-    url = f"{(base_url or OMNIROUTE_BASE_URL)}/chat/completions"
+    """Call Google Gemini REST API (gemini-3.1-flash-lite) using requests."""
+    key = GEMINI_API_KEY
+    if not key:
+        raise ValueError("GEMINI_API_KEY environment variable is not configured.")
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={key}"
     payload = {
-        "model": model or OMNIROUTE_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_message}
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": user_message}]
+            }
         ],
-        "temperature": 0.1
+        "generationConfig": {
+            "temperature": 0.1
+        }
     }
-    resp = requests.post(url, json=payload, timeout=30)
+    resp = requests.post(url, json=payload, timeout=60)
     resp.raise_for_status()
     data = resp.json()
-    return data["choices"][0]["message"]["content"]
+    return data["candidates"][0]["content"]["parts"][0]["text"]
 
 
 def clean_json_text(text: str) -> str:
@@ -154,4 +164,4 @@ def run_agent(user_question: str) -> str:
         return final_answer
     except Exception as e:
         logger.error(f"Error in agent workflow: {e}", exc_info=True)
-        return "متأسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً از فعال بودن سرویس OmniRoute و اتصال اینترنت اطمینان حاصل کنید."
+        return "متأسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً از فعال بودن GEMINI_API_KEY و اتصال اینترنت اطمینان حاصل کنید."

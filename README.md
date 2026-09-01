@@ -12,7 +12,7 @@ Standard chatbots answer questions in a single LLM call. When asked about curren
 Finance Agent solves this by decoupling reasoning from data retrieval into three clear steps:
 
 1. **Plan**:
-   The incoming question is sent to an LLM via OmniRoute's local endpoint (`http://localhost:20128/v1`, model `auto`). The system prompt instructs the model to return a structured JSON plan specifying **which tools** need to be called (e.g., `get_gold_price`, `get_toman_rate`, `get_historical_comparison`, `calculator`). The LLM does **not** answer the question at this step.
+   The incoming question is sent to Google's Gemini API directly via REST (`gemini-3.1-flash-lite`). The system prompt instructs the model to return a structured JSON plan specifying **which tools** need to be called (e.g., `get_gold_price`, `get_toman_rate`, `get_historical_comparison`, `calculator`). The LLM does **not** answer the question at this step.
 
 2. **Act**:
    The agent parses the plan JSON and executes the required tool functions:
@@ -30,7 +30,7 @@ Finance Agent solves this by decoupling reasoning from data retrieval into three
 
 ### 1. Prerequisites
 - **Python 3.9+**
-- **OmniRoute**: Local LLM endpoint must be running at `http://localhost:20128/v1` (with model `auto` available).
+- **Google Gemini API Key** (`GEMINI_API_KEY`)
 
 ### 2. Installation
 ```bash
@@ -48,8 +48,7 @@ Edit `local.env`:
 ```env
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 BRSAPI_KEY=your_brsapi_key_here
-OMNIROUTE_BASE_URL=http://localhost:20128/v1
-OMNIROUTE_MODEL=auto
+GEMINI_API_KEY=your_gemini_api_key_here
 HISTORY_FILE_PATH=price_history.json
 ```
 
@@ -60,7 +59,7 @@ pytest
 ```
 
 ### 5. Running the Bot
-Make sure OmniRoute is running locally on port 20128, then run:
+Make sure `GEMINI_API_KEY` is set in `local.env`, then run:
 ```bash
 python bot.py
 ```
