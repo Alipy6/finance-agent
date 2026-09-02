@@ -3,6 +3,7 @@ import logging
 import requests
 from config import TELEGRAM_BOT_TOKEN
 import agent
+import string
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -21,7 +22,7 @@ FINANCIAL_KEYWORDS = {"طلا", "ارز", "دلار", "تتر", "تومان", "�
 
 def is_small_talk(text: str) -> bool:
     """Return True if message is casual small talk rather than a financial query."""
-    cleaned = text.strip().lower()
+    cleaned = text.strip().lower().strip(string.punctuation + "؟!،")
 
     if cleaned.startswith("/"):
         return False
