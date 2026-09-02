@@ -67,6 +67,9 @@ def test_act_step(mock_toman, mock_gold):
     assert "get_toman_rate" in results
     assert results["get_gold_price"]["price_per_oz_usd"] == 2700.0
     assert results["get_toman_rate"]["rate_toman"] == 60000.0
+    assert "computed_toman_prices" in results
+    assert results["computed_toman_prices"]["gram_24k_toman"] == 5208000.0
+    assert results["computed_toman_prices"]["gram_18k_toman"] == 3906000.0
 
 
 @patch("tools.get_gold_price")

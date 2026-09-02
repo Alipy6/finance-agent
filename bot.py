@@ -11,6 +11,34 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+SMALL_TALK_WORDS = {
+    "سلام", "درود", "hi", "hello", "hey", "خداحافظ", "خدافظ", "بای", "bye",
+    "چطوری", "چطورید", "ممنون", "مرسی", "thanks", "thank you", "صبح بخیر", "عصر بخیر", "شب بخیر"
+}
+
+FINANCIAL_KEYWORDS = {"طلا", "ارز", "دلار", "تتر", "تومان", "نرخ", "قیمت", "چنده", "چقدر", "سکه", "انس", "گرم", "خرید", "فروش"}
+
+
+def is_small_talk(text: str) -> bool:
+    """Return True if message is casual small talk rather than a financial query."""
+    cleaned = text.strip().lower()
+
+    if cleaned.startswith("/"):
+        return False
+
+    if any(keyword in cleaned for keyword in FINANCIAL_KEYWORDS):
+        return False
+
+    if cleaned in SMALL_TALK_WORDS:
+        return True
+
+    words = cleaned.split()
+    if len(words) <= 2 and any(w in SMALL_TALK_WORDS for w in words):
+        return True
+
+    return False
+
+
 def send_message(chat_id: int, text: str) -> None:
     """Send text message to Telegram chat via API."""
     if not TELEGRAM_BOT_TOKEN:
@@ -57,6 +85,10 @@ def process_update(update: dict) -> None:
             "• یا: «قیمت طلا امروز چنده؟»"
         )
         send_message(chat_id, welcome_msg)
+        return
+
+    if is_small_talk(text):
+        send_message(chat_id, "سلام! میتونی درباره قیمت طلا یا تتر ازم بپرسی.")
         return
 
     # Notify user that agent is processing

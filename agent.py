@@ -129,6 +129,20 @@ def act_step(plan: dict) -> dict:
             )
             results["calculator"] = calc_result
 
+    if (gold_data and gold_data.get("status") == "success" and
+        toman_data and toman_data.get("status") == "success"):
+        gram_24k_usd = gold_data.get("price_per_gram_24k_usd", 0)
+        rate_toman = toman_data.get("rate_toman", 0)
+        
+        gram_24k_toman = round(gram_24k_usd * rate_toman, 0)
+        gram_18k_toman = round(gram_24k_toman * 0.75, 0)
+        
+        results["computed_toman_prices"] = {
+            "status": "success",
+            "gram_24k_toman": gram_24k_toman,
+            "gram_18k_toman": gram_18k_toman
+        }
+
     return results
 
 
@@ -138,9 +152,10 @@ def build_synthesize_prompt(user_question: str, tool_results: dict) -> tuple[str
         "You are an AI financial agent. Respond to the user's question in Persian based ONLY on the provided tool data.\n"
         "STRICT REQUIREMENTS:\n"
         "1. Base your answer strictly on the fetched data provided below.\n"
-        "2. Do NOT invent, assume, or guess any price, exchange rate, math calculation, or statistic not present in the tool results.\n"
-        "3. If historical data or Toman rate is reported as unavailable or missing in tool results, state honestly in Persian that this information is not available.\n"
-        "4. Provide a clear, natural, and concise answer in Persian."
+        "2. Values already present in tool_results — including computed_toman_prices (such as 24k and 18k gram gold prices in Toman) — are legitimate grounded data; state and use them freely.\n"
+        "3. Do NOT invent, assume, or guess any price, exchange rate, math calculation, or statistic not present in the tool results.\n"
+        "4. If historical data or Toman rate is reported as unavailable or missing in tool results, state honestly in Persian that this information is not available.\n"
+        "5. Provide a clear, natural, and concise answer in Persian."
     )
     
     context_str = json.dumps(tool_results, ensure_ascii=False, indent=2)
