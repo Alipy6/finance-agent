@@ -40,7 +40,39 @@ def is_small_talk(text: str) -> bool:
     return False
 
 
-def send_message(chat_id: int, text: str) -> None:
+WELCOME_MESSAGE = (
+    "Welcome to <b>Finance Agent AI</b>! 🤖📈\n\n"
+    "I am an intelligent financial agent powered by real-time market data and LLM reasoning.\n\n"
+    "Here is what I can do for you:\n"
+    "• 🥇 <b>Gold Price</b>: Real-time XAU/USD spot & 24k/18k gram prices.\n"
+    "• 💵 <b>Toman Rate</b>: Live USDT/Toman conversion rates.\n"
+    "• 🪙 <b>Crypto Analysis</b>: Grounded market insights.\n"
+    "• 📊 <b>Analyze a Chart</b>: Technical chart guidance.\n"
+    "• ❓ <b>Ask Anything</b>: Type any question in Persian or English!\n\n"
+    "Select an option below or type your question directly:"
+)
+
+
+def get_main_keyboard() -> dict:
+    """Return Telegram inline keyboard reply_markup dict with main action buttons."""
+    return {
+        "inline_keyboard": [
+            [
+                {"text": "🥇 Gold Price", "callback_data": "cmd_gold_price"},
+                {"text": "💵 Toman Rate", "callback_data": "cmd_toman_rate"}
+            ],
+            [
+                {"text": "🪙 Crypto Analysis", "callback_data": "cmd_crypto_analysis"},
+                {"text": "📊 Analyze a Chart", "callback_data": "cmd_analyze_chart"}
+            ],
+            [
+                {"text": "❓ Ask a Question", "callback_data": "cmd_ask_question"}
+            ]
+        ]
+    }
+
+
+def send_message(chat_id: int, text: str, reply_markup: dict = None) -> None:
     """Send text message to Telegram chat via API."""
     if not TELEGRAM_BOT_TOKEN:
         logger.error("TELEGRAM_BOT_TOKEN is missing. Cannot send message.")
@@ -52,6 +84,9 @@ def send_message(chat_id: int, text: str) -> None:
         "text": text,
         "parse_mode": "HTML"
     }
+    if reply_markup:
+        payload["reply_markup"] = reply_markup
+
     try:
         resp = requests.post(url, json=payload, timeout=15)
         # Fallback to plain text if HTML parsing fails
@@ -62,8 +97,71 @@ def send_message(chat_id: int, text: str) -> None:
         logger.error(f"Error sending message to Telegram: {e}")
 
 
+def answer_callback_query(callback_query_id: str, text: str = None) -> None:
+    """Acknowledge Telegram callback query button tap."""
+    if not TELEGRAM_BOT_TOKEN or not callback_query_id:
+        return
+
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/answerCallbackQuery"
+    payload = {"callback_query_id": callback_query_id}
+    if text:
+        payload["text"] = text
+
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        logger.error(f"Error answering callback query: {e}")
+
+
 def process_update(update: dict) -> None:
-    """Process a single Telegram update dict."""
+    """Process a single Telegram update dict (message or callback_query)."""
+    # 1. Handle callback_query updates (button taps)
+    if "callback_query" in update:
+        cb = update["callback_query"]
+        cb_id = cb.get("id")
+        cb_data = cb.get("data", "")
+        message = cb.get("message", {})
+        chat_id = message.get("chat", {}).get("id")
+
+        if cb_id:
+            answer_callback_query(cb_id)
+
+        if not chat_id:
+            return
+
+        logger.info(f"Received callback query '{cb_data}' from chat {chat_id}")
+
+        if cb_data == "cmd_gold_price":
+            query_text = "قیمت طلا امروز گرمی و اونسی چنده؟"
+        elif cb_data == "cmd_toman_rate":
+            query_text = "نرخ تتر و دلار به تومان چنده؟"
+        elif cb_data == "cmd_crypto_analysis":
+            query_text = "وضعیت کل بازار کریپتو و تتر چطوریه؟"
+        elif cb_data == "cmd_analyze_chart":
+            send_message(
+                chat_id,
+                "📊 برای تحلیل نمودار، لطفاً تصویر نمودار یا نام جفتارز مورد نظرتان را به همراه سؤال خود ارسال کنید."
+            )
+            return
+        elif cb_data == "cmd_ask_question":
+            send_message(
+                chat_id,
+                "❓ لطفاً سؤال مالی خود را درباره طلا، تتر یا ارزها بنویسید تا بهصورت دقیق پاسخ دهم."
+            )
+            return
+        else:
+            query_text = cb_data
+
+        send_message(chat_id, "⏳ در حال دریافت قیمتهای زنده و تحلیل پاسخ...")
+        try:
+            answer = agent.run_agent(query_text)
+            send_message(chat_id, answer)
+        except Exception as e:
+            logger.error(f"Unhandled error processing callback query: {e}", exc_info=True)
+            send_message(chat_id, "متأسفانه در پاسخگویی خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        return
+
+    # 2. Handle standard message updates
     message = update.get("message")
     if not message:
         return
@@ -77,19 +175,11 @@ def process_update(update: dict) -> None:
     logger.info(f"Received question from chat {chat_id}: '{text}'")
 
     if text.startswith("/start"):
-        welcome_msg = (
-            "سلام! من ربات ایجنت مالی (Finance Agent) هستم. 🤖\n\n"
-            "من از معماری Plan → Act → Synthesize استفاده میکنم و دادههای قیمت طلا و ارز را بهصورت زنده دریافت میکنم.\n\n"
-            "میتوانید سؤالات خود را به فارسی یا انگلیسی بپرسید:\n"
-            "• مثلاً: «طلا الان گرونه یا ارزون نسبت به هفته پیش؟»\n"
-            "• یا: «با ۱۰۰ دلار الان چقدر طلا میتونم بخرم؟»\n"
-            "• یا: «قیمت طلا امروز چنده؟»"
-        )
-        send_message(chat_id, welcome_msg)
+        send_message(chat_id, WELCOME_MESSAGE, reply_markup=get_main_keyboard())
         return
 
     if is_small_talk(text):
-        send_message(chat_id, "سلام! میتونی درباره قیمت طلا یا تتر ازم بپرسی.")
+        send_message(chat_id, "سلام! میتونی درباره قیمت طلا یا تتر ازم بپرسی.", reply_markup=get_main_keyboard())
         return
 
     # Notify user that agent is processing
