@@ -179,3 +179,54 @@ def test_process_update_english_user_callback_query(mock_run_agent, mock_send_me
     assert len(calls) == 2
     assert "Fetching live market data" in calls[0][0][1]
     assert calls[1][0][1] == "The gold price per ounce is $2735."
+
+
+
+@patch("bot.download_file")
+@patch("bot.send_message")
+@patch("agent.analyze_chart_image")
+def test_process_update_photo_message_success(mock_analyze, mock_send_message, mock_download):
+    mock_download.return_value = b"chart_image_bytes"
+    mock_analyze.return_value = "Chart indicates strong support at 2700."
+
+    update = {
+        "message": {
+            "chat": {"id": 12345},
+            "photo": [
+                {"file_id": "small_id"},
+                {"file_id": "largest_id"}
+            ],
+            "caption": "Check this gold chart trend"
+        }
+    }
+    process_update(update)
+
+    mock_download.assert_called_once_with("largest_id")
+    mock_analyze.assert_called_once_with(b"chart_image_bytes", caption="Check this gold chart trend", language="en")
+    calls = mock_send_message.call_args_list
+    assert len(calls) == 2
+    assert "Downloading and analyzing chart image..." in calls[0][0][1]
+    assert calls[1][0][1] == "Chart indicates strong support at 2700."
+
+
+@patch("bot.download_file")
+@patch("bot.send_message")
+@patch("agent.analyze_chart_image")
+def test_process_update_photo_message_download_failure(mock_analyze, mock_send_message, mock_download):
+    mock_download.return_value = None
+
+    update = {
+        "message": {
+            "chat": {"id": 12345},
+            "photo": [{"file_id": "pic123"}],
+            "caption": "تحلیل این چارت"
+        }
+    }
+    process_update(update)
+
+    mock_download.assert_called_once_with("pic123")
+    mock_analyze.assert_not_called()
+    calls = mock_send_message.call_args_list
+    assert len(calls) == 2
+    assert "در حال دریافت و تحلیل" in calls[0][0][1]
+    assert "خطا در دریافت تصویر" in calls[1][0][1]

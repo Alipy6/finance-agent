@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import re
@@ -15,6 +16,7 @@ Available tools:
 2. "get_toman_rate": Fetch current USDT to Toman rate. Parameters: none.
 3. "get_historical_comparison": Compare gold price with logged past data. Parameters: {"days_ago": <int, default 7>}.
 4. "calculator": Calculate gold amount from USD/Toman or evaluate math expression. Parameters: {"usd_amount": <float>, "toman_amount": <float>, "expression": <string>}.
+5. "get_crypto_price": Fetch current USD price and 24h percent change for a cryptocurrency. Parameters: {"symbol": <string, default "bitcoin", e.g. "bitcoin", "ethereum", "tether", "solana", "btc", "eth">}.
 
 Instructions:
 - Output ONLY a valid JSON object. Do not include markdown code block quotes (like ```json), commentary, or extra text.
@@ -105,6 +107,9 @@ def act_step(plan: dict) -> dict:
         elif name == "get_historical_comparison":
             days_ago = int(params.get("days_ago", 7))
             results["get_historical_comparison"] = tools.get_historical_comparison(days_ago=days_ago)
+        elif name == "get_crypto_price":
+            symbol = params.get("symbol", "bitcoin")
+            results["get_crypto_price"] = tools.get_crypto_price(symbol=symbol)
 
     has_calc = any(item.get("name") == "calculator" for item in tool_list)
     if has_calc and not gold_data:
@@ -160,9 +165,9 @@ def build_synthesize_prompt(user_question: str, tool_results: dict, language: st
         f"You are an AI financial agent. Respond in {lang_name} — same language as user's original question based ONLY on the provided tool data.\n"
         "STRICT REQUIREMENTS:\n"
         "1. Base your answer strictly on the fetched data provided below.\n"
-        "2. Values already present in tool_results — including computed_toman_prices (such as 24k and 18k gram gold prices in Toman) — are legitimate grounded data; state and use them freely.\n"
+        "2. Values already present in tool_results — including computed_toman_prices (such as 24k and 18k gram gold prices in Toman) and cryptocurrency market data (such as USD price and 24h change) — are legitimate grounded data; state and use them freely.\n"
         "3. Do NOT invent, assume, or guess any price, exchange rate, math calculation, or statistic not present in the tool results.\n"
-        f"4. If historical data or Toman rate is reported as unavailable or missing in tool results, state honestly in {lang_name} that this information is not available.\n"
+        f"4. If historical data, Toman rate, or crypto price is reported as unavailable or missing in tool results, state honestly in {lang_name} that this information is not available.\n"
         f"5. Provide a clear, natural, and concise answer in {lang_name}."
     )
     
@@ -192,3 +197,65 @@ def run_agent(user_question: str) -> str:
             return "متأسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً از فعال بودن GEMINI_API_KEY و اتصال اینترنت اطمینان حاصل کنید."
         else:
             return "Sorry, an error occurred while processing your request. Please ensure GEMINI_API_KEY is configured and internet connection is active."
+
+
+
+def analyze_chart_image(image_bytes: bytes, caption: str = "", language: str = "fa") -> str:
+    """Send chart image and optional caption to Gemini's vision capability for observational technical analysis."""
+    key = GEMINI_API_KEY
+    if not key:
+        if language == "fa":
+            return "کلید GEMINI_API_KEY تنظیم نشده است."
+        return "GEMINI_API_KEY environment variable is not configured."
+
+    lang_name = "Persian" if language == "fa" else "English"
+    system_prompt = (
+        f"You are an expert financial chart analysis AI agent. Respond in {lang_name}.\n"
+        "STRICT REQUIREMENTS:\n"
+        "1. Provide a detailed observational technical analysis of the visible chart image (such as key trends, pattern structure, visible support and resistance levels, and indicators if visible).\n"
+        "2. Explicitly do NOT provide financial advice, price targets, or absolute future predictions.\n"
+        f"3. Provide a clear, professional, and helpful analysis in {lang_name}."
+    )
+
+    user_text = caption.strip() if caption and caption.strip() else (
+        "لطفاً این نمودار را تحلیل کنید." if language == "fa" else "Please analyze this chart."
+    )
+
+    base64_img = base64.b64encode(image_bytes).decode("utf-8")
+
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={key}"
+    payload = {
+        "system_instruction": {
+            "parts": [{"text": system_prompt}]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "inline_data": {
+                            "mime_type": "image/jpeg",
+                            "data": base64_img
+                        }
+                    },
+                    {
+                        "text": user_text
+                    }
+                ]
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.2
+        }
+    }
+
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"]
+    except Exception as e:
+        logger.error(f"Error calling Gemini vision API: {e}", exc_info=True)
+        if language == "fa":
+            return "متأسفانه در تحلیل تصویر نمودار خطایی رخ داد. لطفاً بعداً دوباره تلاش کنید."
+        return "Sorry, an error occurred while analyzing the chart image. Please try again later."

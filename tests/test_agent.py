@@ -1,6 +1,6 @@
 import json
-from unittest.mock import patch
-from agent import build_synthesize_prompt, clean_json_text, plan_step, act_step, detect_language
+from unittest.mock import patch, MagicMock
+from agent import build_synthesize_prompt, clean_json_text, plan_step, act_step, detect_language, analyze_chart_image
 
 
 def test_detect_language():
@@ -122,3 +122,62 @@ def test_act_step_auto_fetch_toman_and_gold(mock_toman, mock_gold):
     assert "get_toman_rate" in results
     assert "calculator" in results
     assert results["calculator"]["status"] == "success"
+
+
+
+@patch("tools.get_crypto_price")
+def test_act_step_get_crypto_price(mock_crypto):
+    mock_crypto.return_value = {
+        "status": "success",
+        "symbol": "btc",
+        "coin_id": "bitcoin",
+        "price_usd": 68500.0,
+        "change_24h_percent": 2.5
+    }
+
+    plan = {"tools": [{"name": "get_crypto_price", "params": {"symbol": "btc"}}]}
+    results = act_step(plan)
+
+    mock_crypto.assert_called_once_with(symbol="btc")
+    assert "get_crypto_price" in results
+    assert results["get_crypto_price"]["price_usd"] == 68500.0
+
+
+@patch("agent.GEMINI_API_KEY", "mock_key")
+@patch("agent.requests.post")
+def test_analyze_chart_image_success(mock_post):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "candidates": [
+            {
+                "content": {
+                    "parts": [{"text": "Bullish trend observed with key resistance at $2750."}]
+                }
+            }
+        ]
+    }
+    mock_post.return_value = mock_resp
+
+    fake_bytes = b"fake_jpeg_bytes"
+    res_en = analyze_chart_image(fake_bytes, caption="Analyze this chart", language="en")
+    assert "Bullish trend observed" in res_en
+
+    called_args, called_kwargs = mock_post.call_args
+    payload = called_kwargs.get("json", {})
+    assert "inline_data" in payload["contents"][0]["parts"][0]
+    assert payload["contents"][0]["parts"][0]["inline_data"]["mime_type"] == "image/jpeg"
+    assert "Analyze this chart" in payload["contents"][0]["parts"][1]["text"]
+
+
+@patch("agent.GEMINI_API_KEY", "mock_key")
+@patch("agent.requests.post")
+def test_analyze_chart_image_failure(mock_post):
+    mock_post.side_effect = Exception("API rate limit reached")
+
+    fake_bytes = b"fake_jpeg_bytes"
+    res_fa = analyze_chart_image(fake_bytes, caption="تحلیل نمودار", language="fa")
+    assert "خطایی رخ داد" in res_fa
+
+    res_en = analyze_chart_image(fake_bytes, caption="Analyze chart", language="en")
+    assert "error occurred" in res_en.lower()

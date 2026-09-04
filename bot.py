@@ -116,72 +116,138 @@ def answer_callback_query(callback_query_id: str, text: str = None) -> None:
         logger.error(f"Error answering callback query: {e}")
 
 
-def process_update(update: dict) -> None:
-    """Process a single Telegram update dict (message or callback_query)."""
-    # 1. Handle callback_query updates (button taps)
-    if "callback_query" in update:
-        cb = update["callback_query"]
-        cb_id = cb.get("id")
-        cb_data = cb.get("data", "")
-        message = cb.get("message", {})
-        chat_id = message.get("chat", {}).get("id")
+def handle_callback_query(cb: dict) -> None:
+    """Handle Telegram callback_query button taps."""
+    cb_id = cb.get("id")
+    cb_data = cb.get("data", "")
+    message = cb.get("message", {})
+    chat_id = message.get("chat", {}).get("id")
 
-        if cb_id:
-            answer_callback_query(cb_id)
+    if cb_id:
+        answer_callback_query(cb_id)
 
-        if not chat_id:
-            return
-
-        logger.info(f"Received callback query '{cb_data}' from chat {chat_id}")
-
-        cb_lang = USER_LANGUAGES.get(chat_id, "fa")
-
-        if cb_data == "cmd_gold_price":
-            query_text = "قیمت طلا امروز گرمی و اونسی چنده؟" if cb_lang == "fa" else "What is the price of gold per gram and per ounce today?"
-        elif cb_data == "cmd_toman_rate":
-            query_text = "نرخ تتر و دلار به تومان چنده؟" if cb_lang == "fa" else "What is the USDT to Toman exchange rate today?"
-        elif cb_data == "cmd_crypto_analysis":
-            query_text = "وضعیت کل بازار کریپتو و تتر چطوریه؟" if cb_lang == "fa" else "What is the overall crypto market status and USDT rate?"
-        elif cb_data == "cmd_analyze_chart":
-            msg = (
-                "📊 برای تحلیل نمودار، لطفاً تصویر نمودار یا نام جفتارز مورد نظرتان را به همراه سؤال خود ارسال کنید."
-                if cb_lang == "fa"
-                else "📊 To analyze a chart, please send a chart image or trading pair symbol along with your question."
-            )
-            send_message(chat_id, msg)
-            return
-        elif cb_data == "cmd_ask_question":
-            msg = (
-                "❓ لطفاً سؤال مالی خود را درباره طلا، تتر یا ارزها بنویسید تا بهصورت دقیق پاسخ دهم."
-                if cb_lang == "fa"
-                else "❓ Please type your financial question about gold, USDT, or currencies so I can answer accurately."
-            )
-            send_message(chat_id, msg)
-            return
-        else:
-            query_text = cb_data
-
-        status_msg = "⏳ در حال دریافت قیمتهای زنده و تحلیل پاسخ..." if cb_lang == "fa" else "⏳ Fetching live market data and analyzing..."
-        send_message(chat_id, status_msg)
-
-        try:
-            answer = agent.run_agent(query_text)
-            send_message(chat_id, answer)
-        except Exception as e:
-            logger.error(f"Unhandled error processing callback query: {e}", exc_info=True)
-            err_msg = "متأسفانه در پاسخگویی خطایی رخ داد. لطفاً دوباره تلاش کنید." if cb_lang == "fa" else "Sorry, an error occurred while processing your request. Please try again."
-            send_message(chat_id, err_msg)
+    if not chat_id:
         return
 
-    # 2. Handle standard message updates
+    logger.info(f"Received callback query '{cb_data}' from chat {chat_id}")
+
+    cb_lang = USER_LANGUAGES.get(chat_id, "fa")
+
+    if cb_data == "cmd_gold_price":
+        query_text = "قیمت طلا امروز گرمی و اونسی چنده؟" if cb_lang == "fa" else "What is the price of gold per gram and per ounce today?"
+    elif cb_data == "cmd_toman_rate":
+        query_text = "نرخ تتر و دلار به تومان چنده؟" if cb_lang == "fa" else "What is the USDT to Toman exchange rate today?"
+    elif cb_data == "cmd_crypto_analysis":
+        query_text = "وضعیت کل بازار کریپتو و تتر چطوریه؟" if cb_lang == "fa" else "What is the overall crypto market status and USDT rate?"
+    elif cb_data == "cmd_analyze_chart":
+        msg = (
+            "📊 برای تحلیل نمودار، لطفاً تصویر نمودار یا نام جفتارز مورد نظرتان را به همراه سؤال خود ارسال کنید."
+            if cb_lang == "fa"
+            else "📊 To analyze a chart, please send a chart image or trading pair symbol along with your question."
+        )
+        send_message(chat_id, msg)
+        return
+    elif cb_data == "cmd_ask_question":
+        msg = (
+            "❓ لطفاً سؤال مالی خود را درباره طلا، تتر یا ارزها بنویسید تا بهصورت دقیق پاسخ دهم."
+            if cb_lang == "fa"
+            else "❓ Please type your financial question about gold, USDT, or currencies so I can answer accurately."
+        )
+        send_message(chat_id, msg)
+        return
+    else:
+        query_text = cb_data
+
+    status_msg = "⏳ در حال دریافت قیمتهای زنده و تحلیل پاسخ..." if cb_lang == "fa" else "⏳ Fetching live market data and analyzing..."
+    send_message(chat_id, status_msg)
+
+    try:
+        answer = agent.run_agent(query_text)
+        send_message(chat_id, answer)
+    except Exception as e:
+        logger.error(f"Unhandled error processing callback query: {e}", exc_info=True)
+        err_msg = "متأسفانه در پاسخگویی خطایی رخ داد. لطفاً دوباره تلاش کنید." if cb_lang == "fa" else "Sorry, an error occurred while processing your request. Please try again."
+        send_message(chat_id, err_msg)
+
+def download_file(file_id: str) -> bytes | None:
+    """Download a file from Telegram API by file_id."""
+    if not TELEGRAM_BOT_TOKEN or not file_id:
+        return None
+
+    get_file_url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getFile"
+    try:
+        resp = requests.get(get_file_url, params={"file_id": file_id}, timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data.get("ok"):
+            return None
+        file_path = data.get("result", {}).get("file_path")
+        if not file_path:
+            return None
+
+        download_url = f"https://api.telegram.org/file/bot{TELEGRAM_BOT_TOKEN}/{file_path}"
+        file_resp = requests.get(download_url, timeout=30)
+        file_resp.raise_for_status()
+        return file_resp.content
+    except Exception as e:
+        logger.error(f"Failed to download file {file_id} from Telegram: {e}")
+        return None
+
+
+def process_update(update: dict) -> None:
+    """Process an incoming update from Telegram (callback_query, text message, or photo message)."""
+    callback_query = update.get("callback_query")
+    if callback_query:
+        handle_callback_query(callback_query)
+        return
+
+    # 2. Handle message updates
     message = update.get("message")
     if not message:
         return
 
     chat_id = message.get("chat", {}).get("id")
-    text = message.get("text", "").strip()
+    if not chat_id:
+        return
 
-    if not chat_id or not text:
+    # Handle Photo Messages (Chart Analysis)
+    if "photo" in message:
+        caption = message.get("caption", "").strip()
+        if caption:
+            lang = detect_language(caption)
+            USER_LANGUAGES[chat_id] = lang
+        else:
+            lang = USER_LANGUAGES.get(chat_id, "fa")
+
+        logger.info(f"Received photo message from chat {chat_id} (caption: '{caption}')")
+
+        status_msg = "⏳ در حال دریافت و تحلیل تصویر نمودار..." if lang == "fa" else "⏳ Downloading and analyzing chart image..."
+        send_message(chat_id, status_msg)
+
+        try:
+            photo_list = message.get("photo", [])
+            if not photo_list:
+                return
+
+            largest_photo = photo_list[-1]
+            file_id = largest_photo.get("file_id")
+
+            image_bytes = download_file(file_id)
+            if not image_bytes:
+                err_msg = "خطا در دریافت تصویر از تلگرام." if lang == "fa" else "Failed to download image from Telegram."
+                send_message(chat_id, err_msg)
+                return
+
+            answer = agent.analyze_chart_image(image_bytes, caption=caption, language=lang)
+            send_message(chat_id, answer)
+        except Exception as e:
+            logger.error(f"Unhandled error processing photo update: {e}", exc_info=True)
+            err_msg = "متأسفانه در تحلیل تصویر خطایی رخ داد." if lang == "fa" else "Sorry, an error occurred while analyzing the image."
+            send_message(chat_id, err_msg)
+        return
+
+    text = message.get("text", "").strip()
+    if not text:
         return
 
     logger.info(f"Received question from chat {chat_id}: '{text}'")

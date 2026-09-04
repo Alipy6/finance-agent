@@ -84,3 +84,49 @@ def test_historical_comparison_insufficient_history():
             
         result = get_historical_comparison(days_ago=7, file_path=history_file)
         assert result["status"] == "insufficient_data"
+
+
+
+from unittest.mock import patch, MagicMock
+from tools import get_crypto_price
+
+
+@patch("requests.get")
+def test_get_crypto_price_success(mock_get):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "bitcoin": {
+            "usd": 68500.0,
+            "usd_24h_change": 2.456
+        }
+    }
+    mock_get.return_value = mock_resp
+
+    res = get_crypto_price(symbol="btc")
+    assert res["status"] == "success"
+    assert res["symbol"] == "btc"
+    assert res["coin_id"] == "bitcoin"
+    assert res["price_usd"] == 68500.0
+    assert res["change_24h_percent"] == 2.46
+
+
+@patch("requests.get")
+def test_get_crypto_price_unknown_symbol(mock_get):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {}
+    mock_get.return_value = mock_resp
+
+    res = get_crypto_price(symbol="unknown_coin_xyz")
+    assert res["status"] == "error"
+    assert "not found" in res["message"].lower()
+
+
+@patch("requests.get")
+def test_get_crypto_price_error_response(mock_get):
+    mock_get.side_effect = Exception("Network timeout")
+
+    res = get_crypto_price(symbol="bitcoin")
+    assert res["status"] == "error"
+    assert "Failed to fetch crypto price" in res["message"]

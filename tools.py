@@ -118,6 +118,68 @@ def get_toman_rate(api_key: str = None) -> dict:
         }
 
 
+CRYPTO_SYMBOL_MAP = {
+    "btc": "bitcoin",
+    "eth": "ethereum",
+    "usdt": "tether",
+    "sol": "solana",
+    "bnb": "binancecoin",
+    "xrp": "ripple",
+    "ada": "cardano",
+    "doge": "dogecoin",
+}
+
+
+def get_crypto_price(symbol: str = "bitcoin") -> dict:
+    """
+    Fetch current USD price and 24h percent change for a cryptocurrency from CoinGecko API.
+    """
+    if not symbol:
+        symbol = "bitcoin"
+
+    clean_sym = str(symbol).strip().lower()
+    coin_id = CRYPTO_SYMBOL_MAP.get(clean_sym, clean_sym)
+
+    url = f"https://api.coingecko.com/api/v3/simple/price?ids={coin_id}&vs_currencies=usd&include_24hr_change=true"
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+        )
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if not isinstance(data, dict) or coin_id not in data:
+            return {
+                "status": "error",
+                "message": f"Cryptocurrency '{symbol}' (ID: '{coin_id}') not found in CoinGecko API response."
+            }
+
+        coin_data = data[coin_id]
+        price_usd = coin_data.get("usd")
+        change_24h = coin_data.get("usd_24h_change")
+
+        if price_usd is None:
+            return {
+                "status": "error",
+                "message": f"Price data missing for cryptocurrency '{symbol}'."
+            }
+
+        return {
+            "status": "success",
+            "symbol": clean_sym,
+            "coin_id": coin_id,
+            "price_usd": float(price_usd),
+            "change_24h_percent": round(float(change_24h), 2) if change_24h is not None else 0.0
+        }
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to fetch crypto price for '{symbol}': {str(e)}"}
+
+
 def get_historical_comparison(days_ago: int = 7, file_path: str = None) -> dict:
     """
     Compare current or requested time price with logged historical price in price_history.json.
