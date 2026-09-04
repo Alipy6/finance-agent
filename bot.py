@@ -20,6 +20,8 @@ SMALL_TALK_WORDS = {
 
 FINANCIAL_KEYWORDS = {"طلا", "ارز", "دلار", "تتر", "تومان", "نرخ", "قیمت", "چنده", "چقدر", "سکه", "انس", "گرم", "خرید", "فروش"}
 
+USER_LANGUAGES: dict[int, str] = {}
+
 
 def is_small_talk(text: str) -> bool:
     """Return True if message is casual small talk rather than a financial query."""
@@ -132,28 +134,33 @@ def process_update(update: dict) -> None:
 
         logger.info(f"Received callback query '{cb_data}' from chat {chat_id}")
 
+        cb_lang = USER_LANGUAGES.get(chat_id, "fa")
+
         if cb_data == "cmd_gold_price":
-            query_text = "قیمت طلا امروز گرمی و اونسی چنده؟"
+            query_text = "قیمت طلا امروز گرمی و اونسی چنده؟" if cb_lang == "fa" else "What is the price of gold per gram and per ounce today?"
         elif cb_data == "cmd_toman_rate":
-            query_text = "نرخ تتر و دلار به تومان چنده؟"
+            query_text = "نرخ تتر و دلار به تومان چنده؟" if cb_lang == "fa" else "What is the USDT to Toman exchange rate today?"
         elif cb_data == "cmd_crypto_analysis":
-            query_text = "وضعیت کل بازار کریپتو و تتر چطوریه؟"
+            query_text = "وضعیت کل بازار کریپتو و تتر چطوریه؟" if cb_lang == "fa" else "What is the overall crypto market status and USDT rate?"
         elif cb_data == "cmd_analyze_chart":
-            send_message(
-                chat_id,
+            msg = (
                 "📊 برای تحلیل نمودار، لطفاً تصویر نمودار یا نام جفتارز مورد نظرتان را به همراه سؤال خود ارسال کنید."
+                if cb_lang == "fa"
+                else "📊 To analyze a chart, please send a chart image or trading pair symbol along with your question."
             )
+            send_message(chat_id, msg)
             return
         elif cb_data == "cmd_ask_question":
-            send_message(
-                chat_id,
+            msg = (
                 "❓ لطفاً سؤال مالی خود را درباره طلا، تتر یا ارزها بنویسید تا بهصورت دقیق پاسخ دهم."
+                if cb_lang == "fa"
+                else "❓ Please type your financial question about gold, USDT, or currencies so I can answer accurately."
             )
+            send_message(chat_id, msg)
             return
         else:
             query_text = cb_data
 
-        cb_lang = detect_language(query_text)
         status_msg = "⏳ در حال دریافت قیمتهای زنده و تحلیل پاسخ..." if cb_lang == "fa" else "⏳ Fetching live market data and analyzing..."
         send_message(chat_id, status_msg)
 
@@ -184,6 +191,7 @@ def process_update(update: dict) -> None:
         return
 
     lang = detect_language(text)
+    USER_LANGUAGES[chat_id] = lang
 
     if is_small_talk(text):
         reply = "سلام! میتونی درباره قیمت طلا یا تتر ازم بپرسی." if lang == "fa" else "Hello! You can ask me about gold prices or USDT/Toman rates."

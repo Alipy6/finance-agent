@@ -140,3 +140,42 @@ def test_process_update_english_financial_query(mock_run_agent, mock_send_messag
     assert len(calls) == 2
     assert "Fetching live market data" in calls[0][0][1]
     assert calls[1][0][1] == "The gold price is $2735 per ounce."
+
+
+
+@patch("bot.answer_callback_query")
+@patch("bot.send_message")
+@patch("agent.run_agent")
+def test_process_update_english_user_callback_query(mock_run_agent, mock_send_message, mock_answer_callback):
+    mock_run_agent.return_value = "The gold price per ounce is $2735."
+
+    # 1. User sends an English message first
+    msg_update = {
+        "message": {
+            "chat": {"id": 99999},
+            "text": "How much is gold?"
+        }
+    }
+    process_update(msg_update)
+
+    mock_send_message.reset_mock()
+    mock_run_agent.reset_mock()
+
+    # 2. User taps a button
+    cb_update = {
+        "callback_query": {
+            "id": "cb_999",
+            "data": "cmd_gold_price",
+            "message": {
+                "chat": {"id": 99999}
+            }
+        }
+    }
+    process_update(cb_update)
+
+    mock_answer_callback.assert_called_once_with("cb_999")
+    mock_run_agent.assert_called_once_with("What is the price of gold per gram and per ounce today?")
+    calls = mock_send_message.call_args_list
+    assert len(calls) == 2
+    assert "Fetching live market data" in calls[0][0][1]
+    assert calls[1][0][1] == "The gold price per ounce is $2735."
