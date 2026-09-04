@@ -28,6 +28,13 @@ Instructions:
 """
 
 
+def detect_language(text: str) -> str:
+    """Return 'fa' if text contains Persian/Arabic script characters (\u0600-\u06FF), else 'en'."""
+    if re.search(r'[\u0600-\u06FF]', text):
+        return "fa"
+    return "en"
+
+
 def call_omniroute_llm(system_prompt: str, user_message: str, model: str = None, base_url: str = None) -> str:
     """Call Google Gemini REST API (gemini-3.1-flash-lite) using requests."""
     key = GEMINI_API_KEY
@@ -146,16 +153,17 @@ def act_step(plan: dict) -> dict:
     return results
 
 
-def build_synthesize_prompt(user_question: str, tool_results: dict) -> tuple[str, str]:
+def build_synthesize_prompt(user_question: str, tool_results: dict, language: str = "fa") -> tuple[str, str]:
     """Construct system prompt and user message for synthesize step."""
+    lang_name = "Persian" if language == "fa" else "English"
     system_prompt = (
-        "You are an AI financial agent. Respond to the user's question in Persian based ONLY on the provided tool data.\n"
+        f"You are an AI financial agent. Respond in {lang_name} — same language as user's original question based ONLY on the provided tool data.\n"
         "STRICT REQUIREMENTS:\n"
         "1. Base your answer strictly on the fetched data provided below.\n"
         "2. Values already present in tool_results — including computed_toman_prices (such as 24k and 18k gram gold prices in Toman) — are legitimate grounded data; state and use them freely.\n"
         "3. Do NOT invent, assume, or guess any price, exchange rate, math calculation, or statistic not present in the tool results.\n"
-        "4. If historical data or Toman rate is reported as unavailable or missing in tool results, state honestly in Persian that this information is not available.\n"
-        "5. Provide a clear, natural, and concise answer in Persian."
+        f"4. If historical data or Toman rate is reported as unavailable or missing in tool results, state honestly in {lang_name} that this information is not available.\n"
+        f"5. Provide a clear, natural, and concise answer in {lang_name}."
     )
     
     context_str = json.dumps(tool_results, ensure_ascii=False, indent=2)
@@ -164,19 +172,23 @@ def build_synthesize_prompt(user_question: str, tool_results: dict) -> tuple[str
     return system_prompt, user_message
 
 
-def synthesize_step(user_question: str, tool_results: dict) -> str:
-    """Step 3: Call LLM to synthesize data-grounded final answer in Persian."""
-    sys_prompt, user_msg = build_synthesize_prompt(user_question, tool_results)
+def synthesize_step(user_question: str, tool_results: dict, language: str = "fa") -> str:
+    """Step 3: Call LLM to synthesize data-grounded final answer."""
+    sys_prompt, user_msg = build_synthesize_prompt(user_question, tool_results, language=language)
     return call_omniroute_llm(sys_prompt, user_msg)
 
 
 def run_agent(user_question: str) -> str:
     """Full Plan -> Act -> Synthesize execution pipeline with error handling."""
+    lang = detect_language(user_question)
     try:
         plan = plan_step(user_question)
         tool_results = act_step(plan)
-        final_answer = synthesize_step(user_question, tool_results)
+        final_answer = synthesize_step(user_question, tool_results, language=lang)
         return final_answer
     except Exception as e:
         logger.error(f"Error in agent workflow: {e}", exc_info=True)
-        return "متأسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً از فعال بودن GEMINI_API_KEY و اتصال اینترنت اطمینان حاصل کنید."
+        if lang == "fa":
+            return "متأسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً از فعال بودن GEMINI_API_KEY و اتصال اینترنت اطمینان حاصل کنید."
+        else:
+            return "Sorry, an error occurred while processing your request. Please ensure GEMINI_API_KEY is configured and internet connection is active."

@@ -108,3 +108,35 @@ def test_process_update_callback_query_analyze_chart(mock_run_agent, mock_send_m
     mock_run_agent.assert_not_called()
     mock_send_message.assert_called_once()
     assert "لطفاً تصویر نمودار" in mock_send_message.call_args[0][1]
+@patch("bot.send_message")
+@patch("agent.run_agent")
+def test_process_update_english_small_talk(mock_run_agent, mock_send_message):
+    update = {
+        "message": {
+            "chat": {"id": 12345},
+            "text": "hello"
+        }
+    }
+    process_update(update)
+
+    mock_run_agent.assert_not_called()
+    mock_send_message.assert_called_once_with(12345, "Hello! You can ask me about gold prices or USDT/Toman rates.", reply_markup=get_main_keyboard())
+
+
+@patch("bot.send_message")
+@patch("agent.run_agent")
+def test_process_update_english_financial_query(mock_run_agent, mock_send_message):
+    mock_run_agent.return_value = "The gold price is $2735 per ounce."
+    update = {
+        "message": {
+            "chat": {"id": 12345},
+            "text": "What is the current gold price?"
+        }
+    }
+    process_update(update)
+
+    mock_run_agent.assert_called_once_with("What is the current gold price?")
+    calls = mock_send_message.call_args_list
+    assert len(calls) == 2
+    assert "Fetching live market data" in calls[0][0][1]
+    assert calls[1][0][1] == "The gold price is $2735 per ounce."

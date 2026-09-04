@@ -1,6 +1,24 @@
 import json
 from unittest.mock import patch
-from agent import build_synthesize_prompt, clean_json_text, plan_step, act_step
+from agent import build_synthesize_prompt, clean_json_text, plan_step, act_step, detect_language
+
+
+def test_detect_language():
+    assert detect_language("قیمت طلا امروز چنده؟") == "fa"
+    assert detect_language("سلام، چطوری؟") == "fa"
+    assert detect_language("What is the current gold price?") == "en"
+    assert detect_language("Hello, how are you?") == "en"
+    assert detect_language("100 USD to Toman") == "en"
+
+
+def test_build_synthesize_prompt_bilingual():
+    tool_results = {"status": "success"}
+
+    sys_fa, _ = build_synthesize_prompt("قیمت طلا؟", tool_results, language="fa")
+    assert "Respond in Persian" in sys_fa
+
+    sys_en, _ = build_synthesize_prompt("Gold price?", tool_results, language="en")
+    assert "Respond in English" in sys_en
 
 
 def test_build_synthesize_prompt():

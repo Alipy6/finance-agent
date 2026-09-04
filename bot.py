@@ -1,9 +1,10 @@
 import time
 import logging
 import requests
+import string
 from config import TELEGRAM_BOT_TOKEN
 import agent
-import string
+from agent import detect_language
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -152,13 +153,17 @@ def process_update(update: dict) -> None:
         else:
             query_text = cb_data
 
-        send_message(chat_id, "⏳ در حال دریافت قیمتهای زنده و تحلیل پاسخ...")
+        cb_lang = detect_language(query_text)
+        status_msg = "⏳ در حال دریافت قیمتهای زنده و تحلیل پاسخ..." if cb_lang == "fa" else "⏳ Fetching live market data and analyzing..."
+        send_message(chat_id, status_msg)
+
         try:
             answer = agent.run_agent(query_text)
             send_message(chat_id, answer)
         except Exception as e:
             logger.error(f"Unhandled error processing callback query: {e}", exc_info=True)
-            send_message(chat_id, "متأسفانه در پاسخگویی خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+            err_msg = "متأسفانه در پاسخگویی خطایی رخ داد. لطفاً دوباره تلاش کنید." if cb_lang == "fa" else "Sorry, an error occurred while processing your request. Please try again."
+            send_message(chat_id, err_msg)
         return
 
     # 2. Handle standard message updates
@@ -178,12 +183,16 @@ def process_update(update: dict) -> None:
         send_message(chat_id, WELCOME_MESSAGE, reply_markup=get_main_keyboard())
         return
 
+    lang = detect_language(text)
+
     if is_small_talk(text):
-        send_message(chat_id, "سلام! میتونی درباره قیمت طلا یا تتر ازم بپرسی.", reply_markup=get_main_keyboard())
+        reply = "سلام! میتونی درباره قیمت طلا یا تتر ازم بپرسی." if lang == "fa" else "Hello! You can ask me about gold prices or USDT/Toman rates."
+        send_message(chat_id, reply, reply_markup=get_main_keyboard())
         return
 
     # Notify user that agent is processing
-    send_message(chat_id, "⏳ در حال دریافت قیمتهای زنده و تحلیل پاسخ...")
+    status_msg = "⏳ در حال دریافت قیمتهای زنده و تحلیل پاسخ..." if lang == "fa" else "⏳ Fetching live market data and analyzing..."
+    send_message(chat_id, status_msg)
 
     try:
         # Run Plan -> Act -> Synthesize agent pipeline
@@ -191,7 +200,8 @@ def process_update(update: dict) -> None:
         send_message(chat_id, answer)
     except Exception as e:
         logger.error(f"Unhandled error processing query: {e}", exc_info=True)
-        send_message(chat_id, "متأسفانه در پاسخگویی خطایی رخ داد. لطفاً دوباره تلاش کنید.")
+        err_msg = "متأسفانه در پاسخگویی خطایی رخ داد. لطفاً دوباره تلاش کنید." if lang == "fa" else "Sorry, an error occurred while processing your request. Please try again."
+        send_message(chat_id, err_msg)
 
 
 def start_polling():
