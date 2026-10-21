@@ -1,77 +1,81 @@
-# Finance Agent 🤖📈
+# 🤖📈 Finance Agent — Grounded Plan → Act → Synthesize Financial AI
 
-A Telegram bot that operates as a genuine AI Agent using a **Plan → Act → Synthesize** architecture. Unlike basic chatbots that generate answers directly from parametric memory (which leads to hallucinated numbers or outdated prices), Finance Agent fetches live spot prices and historical logs before synthesizing answers strictly grounded in real data.
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![Architecture](https://img.shields.io/badge/Agent_Pattern-Plan_%E2%86%92_Act_%E2%86%92_Synthesize-10b981)
+![Gemini](https://img.shields.io/badge/LLM_%26_Vision-Google_Gemini_API-8E75B2?logo=googlegemini&logoColor=white)
+![Telegram](https://img.shields.io/badge/Interface-Telegram_Bot_API-26A5E4?logo=telegram&logoColor=white)
+![Pytest](https://img.shields.io/badge/Tests-Pytest_Verified-6366f1?logo=pytest&logoColor=white)
 
----
-
-## 🏛 Architecture & Design Decision
-
-### Why Plan → Act → Synthesize?
-Standard chatbots answer questions in a single LLM call. When asked about current or past market rates (e.g. *"Is gold expensive compared to last week?"*), a single-shot LLM will either refuse to answer or fabricate plausible-sounding prices (hallucination).
-
-Finance Agent solves this by decoupling reasoning from data retrieval into three clear steps:
-
-1. **Plan**:
-   The incoming question is sent to Google's Gemini API directly via REST (`gemini-3.1-flash-lite`). The system prompt instructs the model to return a structured JSON plan specifying **which tools** need to be called (e.g., `get_gold_price`, `get_toman_rate`, `get_historical_comparison`, `calculator`). The LLM does **not** answer the question at this step.
-
-2. **Act**:
-   The agent parses the plan JSON and executes the required tool functions:
-   - `get_gold_price()`: Fetches live XAU/USD spot price and 24k gram price from `gold-api.com`. Automatically logs price & timestamp to `price_history.json`.
-   - `get_toman_rate()`: Fetches USDT/Toman rate from `brsapi.ir` using `BRSAPI_KEY`. If key is missing or call fails, gracefully skips and notes unavailability.
-   - `get_historical_comparison(days_ago)`: Reads local `price_history.json` to calculate change compared to past logged runs. If history is insufficient, reports this honestly without guessing.
-   - `calculator(...)`: Pure Python arithmetic for math or purchasing power calculations (e.g., *"How much gold can I buy with $100?"*).
-
-3. **Synthesize**:
-   A second LLM call receives the user's original question **and** the actual tool execution results as context. A strict system prompt explicitly forbids inventing any statistic or rate not present in the results. The LLM produces a natural, accurate response in Persian.
+A multi-modal Telegram AI Agent engineered around a deterministic **Plan → Act → Synthesize** execution pipeline. Unlike single-shot chatbots that hallucinate market rates from outdated parametric memory, **Finance Agent** dynamically plans tool calls, queries live spot gold, cryptocurrency, and domestic currency APIs, performs exact arithmetic, and synthesizes bilingual (**Persian & English**) responses strictly grounded in fetched data.
 
 ---
 
-## 🚀 Getting Started
+## 🏛️ Architectural Design: Why Plan → Act → Synthesize?
 
-### 1. Prerequisites
-- **Python 3.9+**
-- **Google Gemini API Key** (`GEMINI_API_KEY`)
+```text
+User Query (Text / Chart Photo)
+       │
+       ├──► [Photo Detected] ──► Gemini Multimodal Vision API ──► Observational Chart Analysis
+       │
+       └──► [Text Query]
+                 │
+                 ▼
+         ┌───────────────┐
+         │  1. PLAN STEP │  LLM analyzes intent & outputs a strict JSON tool execution plan
+         └───────┬───────┘
+                 │  {"tools": [{"name": "get_gold_price"}, {"name": "get_toman_rate"}, ...]}
+                 ▼
+         ┌───────────────┐
+         │  2. ACT STEP  │  Python executes deterministic tools & financial calculations
+         └───────┬───────┘
+                 │  Live XAU/USD, 24K/18K Toman Gold, USDT/IRT, CoinGecko Crypto, History Delta
+                 ▼
+         ┌───────────────┐
+         │ 3. SYNTHESIZE │  LLM generates a grounded answer strictly from tool_results JSON
+         └───────────────┘
+Integrated Agent Tools (tools.py)
+get_gold_price(): Fetches real-time international spot gold (XAU/USD) and 24K gram prices from api.gold-api.com, automatically logging records to price_history.json.
 
-### 2. Installation
-```bash
-git clone <repository_url>
+get_toman_rate(): Queries live USDT/IRT Toman exchange rates via BrsApi.ir with multi-source public exchange fallbacks (TetherLand, Wallex, Nobitex) and automatically computes 24K & 18K Gram Gold in Tomans plus Intrinsic Emami Coin Valuation.
+
+get_crypto_price(symbol): Fetches live USD spot prices and 24-hour percentage changes for major cryptocurrencies (BTC, ETH, SOL, TON, BNB, XRP, DOGE, etc.) via CoinGecko.
+
+get_historical_comparison(days_ago): Compares current gold prices against timestamped local historical logs without guessing when history is insufficient.
+
+calculator(...): Safe arithmetic evaluator and purchasing-power converter (calculates exact ounces and 24K/18K grams purchasable with any USD or Toman budget).
+
+analyze_chart_image(...): Multimodal technical chart analyzer powered by Google Gemini Vision—identifies trend structure, support/resistance zones, and visible indicators from user-uploaded chart screenshots.
+
+🚀 Quick Start
+1. Clone & Install Dependencies
+Bash
+git clone https://github.com/Alipy6/finance-agent.git
 cd finance-agent
 pip install -r requirements.txt
-```
+2. Configure Environment Variables
+Copy .env.example to local.env (or .env) and provide your keys:
 
-### 3. Environment Configuration
-Copy `.env.example` to `local.env` (or `.env`):
-```bash
+Bash
 cp .env.example local.env
-```
-Edit `local.env`:
-```env
+Code snippet
 TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
 BRSAPI_KEY=your_brsapi_key_here
 GEMINI_API_KEY=your_gemini_api_key_here
 HISTORY_FILE_PATH=price_history.json
-```
-
-### 4. Running the Tests
-Run pytest to verify tools, historical comparison, and prompt synthesis:
-```bash
-pytest
-```
-
-### 5. Running the Bot
-Make sure `GEMINI_API_KEY` is set in `local.env`, then run:
-```bash
+3. Run the Automated Test Suite
+Bash
+pytest -v
+4. Launch the Agent Bot
+Bash
 python bot.py
-```
-
----
-
-## 📁 Project Structure
-
-- `config.py` — Environment configuration loader.
-- `tools.py` — Data fetching tools (`gold-api.com`, `brsapi.ir`), historical logger (`price_history.json`), and calculator.
-- `agent.py` — Plan → Act → Synthesize pipeline functions using OmniRoute local OpenAI API.
-- `bot.py` — Telegram long-polling loop with error resilience.
-- `tests/` — Pytest unit tests for tools and agent logic.
-- `.env.example` — Environment template.
-- `requirements.txt` — Project dependencies (`requests`, `python-dotenv`, `pytest`).
+📁 Repository Structure
+Plaintext
+finance-agent/
+├── agent.py                     # Plan → Act → Synthesize LLM pipeline & Gemini Vision analyzer
+├── tools.py                     # Market data tools (Gold, USDT/Toman, Crypto, History, Calculator)
+├── bot.py                       # Telegram Bot long-polling loop, inline keyboards & photo handler
+├── config.py                    # Environment configuration & path resolver
+├── tests/                       # Comprehensive unit tests for tools, planner, and synthesizer
+├── .github/workflows/ci.yml     # Automated GitHub Actions Pytest workflow
+├── .env.example                 # Environment variable template
+└── requirements.txt             # Dependencies (requests, python-dotenv, pytest)
