@@ -1,6 +1,7 @@
 import base64
 import json
 import logging
+import os
 import re
 import requests
 from config import GEMINI_API_KEY
@@ -11,7 +12,7 @@ logger = logging.getLogger(__name__)
 GEMINI_MODELS = [
     "gemini-2.5-flash",
     "gemini-2.0-flash",
-    "gemini-3.1-flash-lite",
+    "gemini-1.5-flash",
 ]
 
 PLANNER_SYSTEM_PROMPT = """You are an expert financial AI planner agent.
@@ -44,8 +45,9 @@ def detect_language(text: str) -> str:
 
 
 def call_omniroute_llm(system_prompt: str, user_message: str, model: str = None, base_url: str = None) -> str:
-    """Call Google Gemini REST API with automatic model fallback if a model name returns 404."""
-    key = GEMINI_API_KEY
+    """Call Google Gemini REST API (with automatic model fallback or local OmniRoute fallback)."""
+    # Dynamically reload key from config or environment
+    key = GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         raise ValueError("GEMINI_API_KEY environment variable is not configured.")
 
@@ -69,7 +71,7 @@ def call_omniroute_llm(system_prompt: str, user_message: str, model: str = None,
     for m in models_to_try:
         url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent?key={key}"
         try:
-            resp = requests.post(url, json=payload, timeout=60)
+            resp = requests.post(url, json=payload, timeout=25)
             resp.raise_for_status()
             data = resp.json()
             return data["candidates"][0]["content"]["parts"][0]["text"]
@@ -78,6 +80,7 @@ def call_omniroute_llm(system_prompt: str, user_message: str, model: str = None,
             if getattr(resp if 'resp' in locals() else None, "status_code", None) == 404 and len(models_to_try) > 1:
                 continue
             break
+
     raise last_exc
 
 
@@ -89,8 +92,45 @@ def clean_json_text(text: str) -> str:
     return text.strip()
 
 
+def _heuristic_plan(user_question: str) -> dict:
+    """Smart deterministic planner when LLM is unreachable or slow."""
+    q = user_question.lower()
+    planned = []
+
+    # Check crypto keywords
+    crypto_map = {
+        "bitcoin": "bitcoin", "btc": "bitcoin", "بیت کوین": "bitcoin", "بیت‌کوین": "bitcoin", "بیتکوین": "bitcoin",
+        "ethereum": "ethereum", "eth": "ethereum", "اتریوم": "ethereum",
+        "solana": "solana", "sol": "solana", "سولانا": "solana",
+        "ton": "ton", "تون": "ton",
+        "doge": "doge", "دوج": "doge",
+        "bnb": "bnb", "xrp": "xrp", "ریپل": "xrp",
+    }
+    found_cryptos = set()
+    for kw, sym in crypto_map.items():
+        if kw in q and sym not in found_cryptos:
+            found_cryptos.add(sym)
+            planned.append({"name": "get_crypto_price", "params": {"symbol": sym}})
+
+    if ("کریپتو" in q or "crypto" in q or "ارز دیجیتال" in q) and not found_cryptos:
+        planned.append({"name": "get_crypto_price", "params": {"symbol": "bitcoin"}})
+        planned.append({"name": "get_crypto_price", "params": {"symbol": "ethereum"}})
+
+    if any(w in q for w in ["تتر", "تومان", "دلار", "toman", "usdt", "طلا", "gold", "انس", "گرم", "سکه"]):
+        planned.append({"name": "get_gold_price"})
+        planned.append({"name": "get_toman_rate"})
+
+    if any(w in q for w in ["هفته", "گذشته", "دیروز", "history", "week", "ago"]):
+        planned.append({"name": "get_historical_comparison", "params": {"days_ago": 7}})
+
+    if not planned:
+        planned = [{"name": "get_gold_price"}, {"name": "get_toman_rate"}]
+
+    return {"tools": planned}
+
+
 def plan_step(user_question: str) -> dict:
-    """Step 1: Ask LLM to output JSON execution plan."""
+    """Step 1: Ask LLM to output JSON execution plan, falling back to smart heuristic plan."""
     try:
         raw_output = call_omniroute_llm(PLANNER_SYSTEM_PROMPT, user_question)
         cleaned = clean_json_text(raw_output)
@@ -98,9 +138,9 @@ def plan_step(user_question: str) -> dict:
         if isinstance(plan, dict) and "tools" in plan:
             return plan
     except Exception as e:
-        logger.warning(f"Plan parsing failed or LLM call failed: {e}. Falling back to default plan.")
+        logger.warning(f"Plan parsing failed or LLM call failed: {e}. Using heuristic planner.")
 
-    return {"tools": [{"name": "get_gold_price"}, {"name": "get_toman_rate"}]}
+    return _heuristic_plan(user_question)
 
 
 def act_step(plan: dict) -> dict:
@@ -199,6 +239,51 @@ def build_synthesize_prompt(user_question: str, tool_results: dict, language: st
     return system_prompt, user_message
 
 
+def _fallback_format_answer(tool_results: dict, language: str = "fa") -> str:
+    """Deterministic grounded response formatter when Gemini API is unavailable or key is invalid."""
+    lines = []
+    gold = tool_results.get("get_gold_price") or {}
+    toman = tool_results.get("get_toman_rate") or {}
+    comp = tool_results.get("computed_toman_prices") or {}
+    crypto = tool_results.get("get_crypto_price")
+
+    if language == "fa":
+        lines.append("📊 <b>گزارش زنده بازار (داده‌های لحظه‌ای):</b>\n")
+        if gold.get("status") == "success":
+            lines.append(f"🌎 <b>انس جهانی طلا:</b> {gold['price_per_oz_usd']:,.2f} دلار")
+            lines.append(f"⚖️ <b>هر گرم طلای ۲۴ عیار:</b> {gold['price_per_gram_24k_usd']:,.2f} دلار")
+        if toman.get("status") == "success":
+            lines.append(f"💵 <b>نرخ تتر (USDT):</b> {int(toman['rate_toman']):,} تومان")
+        if comp.get("status") == "success":
+            lines.append(f"🥇 <b>طلای ۱۸ عیار (محاسباتی):</b> {int(comp['gram_18k_toman']):,} تومان")
+            lines.append(f"🏅 <b>طلای ۲۴ عیار (محاسباتی):</b> {int(comp['gram_24k_toman']):,} تومان")
+            if comp.get("intrinsic_emami_coin_toman"):
+                lines.append(f"🟡 <b>ارزش ذاتی طلای سکه امامی:</b> {int(comp['intrinsic_emami_coin_toman']):,} تومان")
+        if crypto:
+            c_list = crypto if isinstance(crypto, list) else [crypto]
+            for c in c_list:
+                if isinstance(c, dict) and c.get("status") == "success":
+                    arrow = "🔺" if c.get("change_24h_percent", 0) >= 0 else "🔻"
+                    lines.append(f"🪙 <b>{c['symbol'].upper()}:</b> {c['price_usd']:,.2f}$ ({arrow} {c.get('change_24h_percent', 0)}%)")
+        return "\n".join(lines) if len(lines) > 1 else "اطلاعات بازار در حال حاضر در دسترس نیست."
+    else:
+        lines.append("📊 <b>Live Grounded Market Report:</b>\n")
+        if gold.get("status") == "success":
+            lines.append(f"🌎 <b>Spot Gold (XAU/USD):</b> ${gold['price_per_oz_usd']:,.2f}")
+            lines.append(f"⚖️ <b>24K Gold per Gram:</b> ${gold['price_per_gram_24k_usd']:,.2f}")
+        if toman.get("status") == "success":
+            lines.append(f"💵 <b>USDT / Toman Rate:</b> {int(toman['rate_toman']):,} Toman")
+        if comp.get("status") == "success":
+            lines.append(f"🥇 <b>18K Gold (per Gram):</b> {int(comp['gram_18k_toman']):,} Toman")
+            lines.append(f"🏅 <b>24K Gold (per Gram):</b> {int(comp['gram_24k_toman']):,} Toman")
+        if crypto:
+            c_list = crypto if isinstance(crypto, list) else [crypto]
+            for c in c_list:
+                if isinstance(c, dict) and c.get("status") == "success":
+                    lines.append(f"🪙 <b>{c['symbol'].upper()}:</b> ${c['price_usd']:,.2f} ({c.get('change_24h_percent', 0):+.2f}%)")
+        return "\n".join(lines) if len(lines) > 1 else "Market data is currently unavailable."
+
+
 def synthesize_step(user_question: str, tool_results: dict, language: str = "fa") -> str:
     """Step 3: Call LLM to synthesize data-grounded final answer."""
     sys_prompt, user_msg = build_synthesize_prompt(user_question, tool_results, language=language)
@@ -206,24 +291,31 @@ def synthesize_step(user_question: str, tool_results: dict, language: str = "fa"
 
 
 def run_agent(user_question: str) -> str:
-    """Full Plan -> Act -> Synthesize execution pipeline with error handling."""
+    """Full Plan -> Act -> Synthesize execution pipeline with automatic grounded fallback."""
     lang = detect_language(user_question)
+    tool_results = {}
     try:
         plan = plan_step(user_question)
         tool_results = act_step(plan)
         final_answer = synthesize_step(user_question, tool_results, language=lang)
         return final_answer
     except Exception as e:
-        logger.error(f"Error in agent workflow: {e}", exc_info=True)
+        logger.error(f"Error in LLM synthesis, using grounded data formatter: {e}")
+        if not tool_results:
+            try:
+                tool_results = act_step(_heuristic_plan(user_question))
+            except Exception:
+                pass
+        if tool_results:
+            return _fallback_format_answer(tool_results, language=lang)
         if lang == "fa":
             return "متأسفانه در پردازش درخواست شما خطایی رخ داد. لطفاً از فعال بودن GEMINI_API_KEY و اتصال اینترنت اطمینان حاصل کنید."
-        else:
-            return "Sorry, an error occurred while processing your request. Please ensure GEMINI_API_KEY is configured and internet connection is active."
+        return "Sorry, an error occurred while processing your request. Please ensure GEMINI_API_KEY is configured and internet connection is active."
 
 
 def analyze_chart_image(image_bytes: bytes, caption: str = "", language: str = "fa") -> str:
     """Send chart image and optional caption to Gemini's vision capability for observational technical analysis."""
-    key = GEMINI_API_KEY
+    key = GEMINI_API_KEY or os.getenv("GEMINI_API_KEY", "").strip()
     if not key:
         if language == "fa":
             return "کلید GEMINI_API_KEY تنظیم نشده است."

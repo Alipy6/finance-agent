@@ -256,6 +256,14 @@ def process_update(update: dict) -> None:
         send_message(chat_id, WELCOME_MESSAGE, reply_markup=get_main_keyboard())
         return
 
+    cmd_clean = text.split()[0].lower()
+    if cmd_clean == "/gold":
+        text = "قیمت لحظه‌ای انس طلا و طلای ۱۸ و ۲۴ عیار به تومان چنده؟"
+    elif cmd_clean == "/toman":
+        text = "نرخ لحظه‌ای تتر و دلار به تومان چنده؟"
+    elif cmd_clean == "/crypto":
+        text = "قیمت لحظه‌ای بیت‌کوین (bitcoin) و اتریوم (ethereum) به دلار و درصد تغییراتشان چنده؟"
+
     lang = detect_language(text)
     USER_LANGUAGES[chat_id] = lang
 
