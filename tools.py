@@ -6,9 +6,20 @@ import requests
 from config import BRSAPI_KEY, HISTORY_FILE_PATH
 
 GRAMS_PER_TROY_OUNCE = 31.1034768
+EMAMI_COIN_PURE_GOLD_GRAMS = 8.133 * 0.900  # 7.3197g of 24K gold
+MAX_HISTORY_RECORDS = 500
+
+BROWSER_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/json",
+}
+
 
 def log_price(price_usd: float, file_path: str = None) -> None:
-    """Log gold spot price with timestamp to local JSON file."""
+    """Log gold spot price with timestamp to local JSON file (with auto-pruning)."""
     path = file_path or HISTORY_FILE_PATH
     history = []
     if os.path.exists(path):
@@ -26,6 +37,9 @@ def log_price(price_usd: float, file_path: str = None) -> None:
     }
     history.append(record)
 
+    if len(history) > MAX_HISTORY_RECORDS:
+        history = history[-MAX_HISTORY_RECORDS:]
+
     with open(path, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
@@ -40,14 +54,13 @@ def get_gold_price(file_path: str = None) -> dict:
         resp = requests.get(url, timeout=10)
         resp.raise_for_status()
         data = resp.json()
-        
+
         price_oz = float(data.get("price", 0))
         if price_oz <= 0:
             return {"status": "error", "message": "Invalid gold price returned from API"}
 
         price_gram_24k = round(price_oz / GRAMS_PER_TROY_OUNCE, 2)
-        
-        # Log fetched price to history file
+
         try:
             log_price(price_oz, file_path=file_path)
         except Exception:
@@ -64,9 +77,51 @@ def get_gold_price(file_path: str = None) -> dict:
         return {"status": "error", "message": f"Failed to fetch gold price: {str(e)}"}
 
 
+def _fetch_fallback_tether_toman() -> float | None:
+    """Multi-source public fallback for live USDT/Toman rate (TetherLand -> Wallex -> Nobitex)."""
+    # 1. TetherLand
+    try:
+        r1 = requests.get("https://api.tetherland.com/currencies", headers=BROWSER_HEADERS, timeout=6)
+        if r1.ok:
+            price = float(r1.json().get("data", {}).get("currencies", {}).get("USDT", {}).get("price") or 0)
+            if price > 1000:
+                return price
+    except Exception:
+        pass
+
+    # 2. Wallex
+    try:
+        r2 = requests.get("https://api.wallex.ir/v1/markets", headers=BROWSER_HEADERS, timeout=6)
+        if r2.ok:
+            price = float(
+                r2.json().get("result", {}).get("symbols", {}).get("USDTTMN", {}).get("stats", {}).get("lastPrice") or 0
+            )
+            if price > 1000:
+                return price
+    except Exception:
+        pass
+
+    # 3. Nobitex (Rials -> Toman)
+    try:
+        r3 = requests.get(
+            "https://api.nobitex.ir/market/stats",
+            params={"srcCurrency": "usdt", "dstCurrency": "rls"},
+            headers=BROWSER_HEADERS,
+            timeout=6,
+        )
+        if r3.ok:
+            rial = float(r3.json().get("stats", {}).get("usdt-rls", {}).get("latest") or 0)
+            if rial > 10000:
+                return float(int(rial // 10))
+    except Exception:
+        pass
+
+    return None
+
+
 def get_toman_rate(api_key: str = None) -> dict:
     """
-    Fetch current USDT/Toman rate from brsapi.ir.
+    Fetch current USDT/Toman rate from brsapi.ir with automatic fallback if price is 0.
     Reads key from environment or parameter.
     """
     key = api_key if api_key is not None else BRSAPI_KEY
@@ -79,18 +134,18 @@ def get_toman_rate(api_key: str = None) -> dict:
     url = f"https://Api.BrsApi.ir/Market/Gold_Currency.php?key={key}"
     try:
         resp = requests.get(
-    url,
-    headers={
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            url,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+                )
+            },
+            timeout=10,
         )
-    },
-    timeout=10,
-)
         resp.raise_for_status()
         data = resp.json()
-        
+
         currency_list = data.get("currency", [])
         if isinstance(currency_list, list):
             for item in currency_list:
@@ -100,13 +155,24 @@ def get_toman_rate(api_key: str = None) -> dict:
                     raw_price = item.get("price")
                     if raw_price is not None:
                         rate = float(raw_price)
-                        return {
-                            "status": "success",
-                            "symbol": "USDT_IRT",
-                            "rate_toman": rate,
-                            "name": name or "USDT/Toman"
-                        }
-        
+                        if rate > 0:
+                            return {
+                                "status": "success",
+                                "symbol": "USDT_IRT",
+                                "rate_toman": rate,
+                                "name": name or "USDT/Toman"
+                            }
+
+        # Fallback if BRSAPI returned 0 for USDT_IRT
+        fb_rate = _fetch_fallback_tether_toman()
+        if fb_rate and fb_rate > 0:
+            return {
+                "status": "success",
+                "symbol": "USDT_IRT",
+                "rate_toman": fb_rate,
+                "name": "USDT/Toman"
+            }
+
         return {
             "status": "unavailable",
             "message": "USDT_IRT rate symbol not found in BRSAPI response."
@@ -127,6 +193,8 @@ CRYPTO_SYMBOL_MAP = {
     "xrp": "ripple",
     "ada": "cardano",
     "doge": "dogecoin",
+    "ton": "the-open-network",
+    "trx": "tron",
 }
 
 
@@ -223,9 +291,8 @@ def get_historical_comparison(days_ago: int = 7, file_path: str = None) -> dict:
         return {"status": "no_data", "message": "No valid historical records parsed."}
 
     valid_records.sort(key=lambda x: x[0])
-    oldest_dt, oldest_price = valid_records[0]
+    oldest_dt, _ = valid_records[0]
 
-    # If the oldest logged record is significantly newer than the requested target time
     if (oldest_dt - target_time).total_seconds() > 43200:
         return {
             "status": "insufficient_data",
@@ -272,13 +339,15 @@ def calculator(usd_amount: float = None, toman_amount: float = None, gold_price_
         equivalent_usd = toman / toman_rate
         oz = equivalent_usd / gold_price_oz_usd
         grams = oz * GRAMS_PER_TROY_OUNCE
+        grams_18k = grams / 0.75
         results["toman_purchase"] = {
             "toman_amount": toman,
             "toman_rate": toman_rate,
             "equivalent_usd": round(equivalent_usd, 2),
             "gold_price_oz_usd": gold_price_oz_usd,
             "ounces_purchasable": round(oz, 4),
-            "grams_24k_purchasable": round(grams, 3)
+            "grams_24k_purchasable": round(grams, 3),
+            "grams_18k_purchasable": round(grams_18k, 3)
         }
 
     if not results:
