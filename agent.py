@@ -8,6 +8,12 @@ import tools
 
 logger = logging.getLogger(__name__)
 
+GEMINI_MODELS = [
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-3.1-flash-lite",
+]
+
 PLANNER_SYSTEM_PROMPT = """You are an expert financial AI planner agent.
 Your job is to analyze the user's question and choose which tool calls are required to answer it.
 
@@ -16,7 +22,7 @@ Available tools:
 2. "get_toman_rate": Fetch current USDT to Toman rate. Parameters: none.
 3. "get_historical_comparison": Compare gold price with logged past data. Parameters: {"days_ago": <int, default 7>}.
 4. "calculator": Calculate gold amount from USD/Toman or evaluate math expression. Parameters: {"usd_amount": <float>, "toman_amount": <float>, "expression": <string>}.
-5. "get_crypto_price": Fetch current USD price and 24h percent change for a cryptocurrency. Parameters: {"symbol": <string, default "bitcoin", e.g. "bitcoin", "ethereum", "tether", "solana", "btc", "eth">}.
+5. "get_crypto_price": Fetch current USD price and 24h percent change for a cryptocurrency. Parameters: {"symbol": <string, default "bitcoin", e.g. "bitcoin", "ethereum", "tether", "solana", "btc", "eth", "ton">}.
 
 Instructions:
 - Output ONLY a valid JSON object. Do not include markdown code block quotes (like ```json), commentary, or extra text.
@@ -38,12 +44,11 @@ def detect_language(text: str) -> str:
 
 
 def call_omniroute_llm(system_prompt: str, user_message: str, model: str = None, base_url: str = None) -> str:
-    """Call Google Gemini REST API (gemini-3.1-flash-lite) using requests."""
+    """Call Google Gemini REST API with automatic model fallback if a model name returns 404."""
     key = GEMINI_API_KEY
     if not key:
         raise ValueError("GEMINI_API_KEY environment variable is not configured.")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={key}"
     payload = {
         "system_instruction": {
             "parts": [{"text": system_prompt}]
@@ -58,10 +63,22 @@ def call_omniroute_llm(system_prompt: str, user_message: str, model: str = None,
             "temperature": 0.1
         }
     }
-    resp = requests.post(url, json=payload, timeout=60)
-    resp.raise_for_status()
-    data = resp.json()
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+
+    models_to_try = [model] if model else GEMINI_MODELS
+    last_exc = None
+    for m in models_to_try:
+        url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent?key={key}"
+        try:
+            resp = requests.post(url, json=payload, timeout=60)
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            last_exc = e
+            if getattr(resp if 'resp' in locals() else None, "status_code", None) == 404 and len(models_to_try) > 1:
+                continue
+            break
+    raise last_exc
 
 
 def clean_json_text(text: str) -> str:
@@ -81,8 +98,8 @@ def plan_step(user_question: str) -> dict:
         if isinstance(plan, dict) and "tools" in plan:
             return plan
     except Exception as e:
-        logger.warning(f"Plan parsing failed or OmniRoute call failed: {e}. Falling back to default plan.")
-    
+        logger.warning(f"Plan parsing failed or LLM call failed: {e}. Falling back to default plan.")
+
     return {"tools": [{"name": "get_gold_price"}, {"name": "get_toman_rate"}]}
 
 
@@ -93,6 +110,7 @@ def act_step(plan: dict) -> dict:
 
     gold_data = None
     toman_data = None
+    crypto_results = []
 
     for item in tool_list:
         name = item.get("name")
@@ -109,7 +127,9 @@ def act_step(plan: dict) -> dict:
             results["get_historical_comparison"] = tools.get_historical_comparison(days_ago=days_ago)
         elif name == "get_crypto_price":
             symbol = params.get("symbol", "bitcoin")
-            results["get_crypto_price"] = tools.get_crypto_price(symbol=symbol)
+            c_res = tools.get_crypto_price(symbol=symbol)
+            crypto_results.append(c_res)
+            results["get_crypto_price"] = c_res if len(crypto_results) == 1 else crypto_results
 
     has_calc = any(item.get("name") == "calculator" for item in tool_list)
     if has_calc and not gold_data:
@@ -131,7 +151,7 @@ def act_step(plan: dict) -> dict:
         if name == "calculator":
             gold_price = gold_data.get("price_per_oz_usd") if (gold_data and gold_data.get("status") == "success") else None
             toman_rate = toman_data.get("rate_toman") if (toman_data and toman_data.get("status") == "success") else None
-            
+
             calc_result = tools.calculator(
                 usd_amount=params.get("usd_amount"),
                 toman_amount=params.get("toman_amount"),
@@ -142,17 +162,19 @@ def act_step(plan: dict) -> dict:
             results["calculator"] = calc_result
 
     if (gold_data and gold_data.get("status") == "success" and
-        toman_data and toman_data.get("status") == "success"):
+            toman_data and toman_data.get("status") == "success"):
         gram_24k_usd = gold_data.get("price_per_gram_24k_usd", 0)
         rate_toman = toman_data.get("rate_toman", 0)
-        
+
         gram_24k_toman = round(gram_24k_usd * rate_toman, 0)
         gram_18k_toman = round(gram_24k_toman * 0.75, 0)
-        
+        intrinsic_emami_coin_toman = round(gram_24k_toman * 7.3197, 0)
+
         results["computed_toman_prices"] = {
             "status": "success",
             "gram_24k_toman": gram_24k_toman,
-            "gram_18k_toman": gram_18k_toman
+            "gram_18k_toman": gram_18k_toman,
+            "intrinsic_emami_coin_toman": intrinsic_emami_coin_toman,
         }
 
     return results
@@ -170,10 +192,10 @@ def build_synthesize_prompt(user_question: str, tool_results: dict, language: st
         f"4. If historical data, Toman rate, or crypto price is reported as unavailable or missing in tool results, state honestly in {lang_name} that this information is not available.\n"
         f"5. Provide a clear, natural, and concise answer in {lang_name}."
     )
-    
+
     context_str = json.dumps(tool_results, ensure_ascii=False, indent=2)
     user_message = f"User Question: {user_question}\n\nTool Results:\n{context_str}"
-    
+
     return system_prompt, user_message
 
 
@@ -199,7 +221,6 @@ def run_agent(user_question: str) -> str:
             return "Sorry, an error occurred while processing your request. Please ensure GEMINI_API_KEY is configured and internet connection is active."
 
 
-
 def analyze_chart_image(image_bytes: bytes, caption: str = "", language: str = "fa") -> str:
     """Send chart image and optional caption to Gemini's vision capability for observational technical analysis."""
     key = GEMINI_API_KEY
@@ -223,7 +244,6 @@ def analyze_chart_image(image_bytes: bytes, caption: str = "", language: str = "
 
     base64_img = base64.b64encode(image_bytes).decode("utf-8")
 
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key={key}"
     payload = {
         "system_instruction": {
             "parts": [{"text": system_prompt}]
@@ -249,13 +269,19 @@ def analyze_chart_image(image_bytes: bytes, caption: str = "", language: str = "
         }
     }
 
-    try:
-        resp = requests.post(url, json=payload, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"]
-    except Exception as e:
-        logger.error(f"Error calling Gemini vision API: {e}", exc_info=True)
-        if language == "fa":
-            return "متأسفانه در تحلیل تصویر نمودار خطایی رخ داد. لطفاً بعداً دوباره تلاش کنید."
-        return "Sorry, an error occurred while analyzing the chart image. Please try again later."
+    for m in GEMINI_MODELS:
+        url = f"[https://generativelanguage.googleapis.com/v1beta/models/](https://generativelanguage.googleapis.com/v1beta/models/){m}:generateContent?key={key}"
+        try:
+            resp = requests.post(url, json=payload, timeout=60)
+            if resp.status_code == 404 and m != GEMINI_MODELS[-1]:
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            return data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            logger.error(f"Error calling Gemini vision API ({m}): {e}", exc_info=True)
+            break
+
+    if language == "fa":
+        return "متأسفانه در تحلیل تصویر نمودار خطایی رخ داد. لطفاً بعداً دوباره تلاش کنید."
+    return "Sorry, an error occurred while analyzing the chart image. Please try again later."
